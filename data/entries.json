@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "text": "Initial deadline setup for new program",
+    "deadline": "2026-08-24T18:00",
+    "status": "open",
+    "created_at": "2026-08-17T15:09:02",
+    "updated_at": "2026-08-17T15:09:02",
+    "events": [
+      {
+        "type": "created",
+        "at": "2026-08-17T15:09:02",
+        "note": "Initial deadline setup for new program"
+      }
+    ]
+  }
+]

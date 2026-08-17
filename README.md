@@ -25,3 +25,33 @@ git log --oneline --decorate --graph --all
 git log --stat
 git blame README.md
 ```
+
+## Deadline Tracking Program
+
+Use this to record what you wrote, when you wrote it, and deadline dates.
+
+```bash
+python3 tracker.py add --text "submit mobile proposal" --deadline "2026-08-21 18:00"
+python3 tracker.py list
+python3 tracker.py edit 1 --text "submit updated mobile proposal"
+python3 tracker.py due --days 7
+python3 tracker.py history 1
+python3 tracker.py done 1
+```
+
+All tracked data is saved in `data/entries.json` with timestamps for create/edit/done events.
+
+## Daily Auto-Commit To GitHub
+
+This creates a daily scheduled commit at 21:00 local time whenever there are changes.
+
+```bash
+chmod +x scripts/auto_commit.sh scripts/install_daily_commit.sh
+./scripts/install_daily_commit.sh
+```
+
+Manual run (any time):
+
+```bash
+./scripts/auto_commit.sh
+```
