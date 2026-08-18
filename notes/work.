@@ -1,45 +1,30 @@
 // ilk girisi duzelt ekrana apple ucun login google (instagram) belke instagrama story kimi gozel gorunum atmaq ucun
-// google ile en problemli hissedilen vaxt ucun xestaxana add et 
+// google ile en problemli hissedilen vaxt ucun xestaxana add et
 
+// seflik olmamasi adina bunu duzeltey
+// YENILENDI (2026-08-19): web (Next.js) tam silindi, layihe artiq yalniz Flutter-dur.
+// Kohne Next.js strukturu (src/, app/, components/ ve s.) artiq YOXDUR.
+// Hazirki struktur:
 
+lifegrapher_mobile/
+├── lib/
+│   └── main.dart                # BUTUN tetbiq kodu (ekranlar, melumatlar, rengler)
+├── assets/
+│   └── logo.png                 # tetbiq loqosu (giris ekrani + ikon)
+├── test/
+│   └── widget_test.dart         # tetbiq testi
+├── android/                     # Android-e xas fayllar (el vurma)
+├── ios/                         # iPhone-a xas fayllar (el vurma)
+├── build/                       # Flutter-in oz yaratdigi fayllar (HEC VAXT deyisme)
+└── pubspec.yaml                 # paketler + assets siyahisi (deyisende: flutter pub get)
 
-
-// seflik olmamasi adina bunu duzeltey 
-
-lifegrapher/
-├── .github/                      # GitHub konfigürasyonları
-├── public/                       # Statik dosyalar (logo, ikonlar vb.)
-├── src/
-│   ├── config/                   # Genel sistem konfigürasyonları ve sabitler
-│   │   └── constants.ts          # Sistem ayarları (Lokasyon, Dil, Saat Dilimi vb.)
-│   ├── app/                      # Uygulama sayfaları ve yönlendirmeler (App Router)
-│   │   ├── (auth)/               # Kimlik doğrulama sayfaları
-│   │   │   ├── login/
-│   │   │   └── register/
-│   │   ├── dashboard/            # Ana Takip Paneli
-│   │   ├── nutrition/            # Kalori ve Yemek Takibi
-│   │   ├── sleep/                # Uyku Takibi
-│   │   ├── layout.tsx
-│   │   └── page.tsx
-│   ├── components/               # Tekrar kullanılabilir arayüz bileşenleri (UI)
-│   │   ├── ui/                   # Butonlar, inputlar, kartlar
-│   │   ├── forms/                # Yemek ve Uyku ekleme formları
-│   │   └── charts/               # Kalori/Uyku günlük ve haftalık grafikler
-│   ├── lib/                      # Veritabanı ve harici servis bağlantıları
-│   │   ├── db.ts                 # Veritabanı bağlantı istemcisi (Prisma/Supabase vb.)
-│   │   └── location.ts           # Konum (Location) servisleri ve koordinat yardımcıları
-│   ├── models/                   # Veritabanı veri modelleri / tipleri
-│   ├── services/                 # İş mantığı ve API çağrıları
-│   │   ├── nutritionService.ts   # Yemek/gıda API entegrasyonu
-│   │   └── sleepService.ts       # Uyku süre ve kalite hesaplamaları
-│   └── types/                    # TypeScript tip tanımlamaları
-│       ├── user.ts
-│       ├── nutrition.ts
-│       └── sleep.ts
-├── .env.example                  # Çevre değişkenleri örneği (DB URL, Location API vb.)
-├── schema.prisma                 # Veritabanı Şeması (Database Schema)
-├── README.md                     # Proje açıklaması ve kurulum adımları
-└── package.json                  # Proje bağımlılıkları ve komutlar
+// Esas komandalar:
+//   flutter run        - tetbiqi simulatorda acir
+//   flutter pub get    - paketleri yukleyir (pubspec.yaml deyisenden sonra)
+//   flutter analyze    - kod sehvlerini gosterir
+//   flutter test       - testleri isletir
+//   flutter clean      - qeribe xeta olanda temizleyir
+// Tam beledci: notes/flutter-baslangic.md
 
 //
 // Not: Menim qeydim. Bu hisseler toxunulmasin.
