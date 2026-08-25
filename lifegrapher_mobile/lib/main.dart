@@ -12,9 +12,7 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const LifeGrapherApp());
 }
 
@@ -23,12 +21,37 @@ class LifeGrapherApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const primaryBlue = Color(0xFF1877C9);
+    const leafGreen = Color(0xFF39A852);
+    const pageBackground = Color(0xFFF5FAFF);
     return MaterialApp(
       title: 'LifeGrapher',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.black),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: primaryBlue,
+          brightness: Brightness.light,
+        ).copyWith(secondary: leafGreen, surface: pageBackground),
         useMaterial3: true,
+        scaffoldBackgroundColor: pageBackground,
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          prefixIconColor: primaryBlue,
+          labelStyle: const TextStyle(color: primaryBlue),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFB9D7F2)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFB9D7F2)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: primaryBlue, width: 2),
+          ),
+        ),
       ),
       home: const AuthGate(),
     );
@@ -73,9 +96,7 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_user != null) {
       return const HomeScreen();
@@ -114,8 +135,12 @@ class UserService {
     // collision even when two users sign up at the same time.
     for (var attempt = 0; attempt < 10; attempt++) {
       final loginId = _newLoginId();
-      final idRef = FirebaseFirestore.instance.collection('userIds').doc(loginId);
-      final created = await FirebaseFirestore.instance.runTransaction((tx) async {
+      final idRef = FirebaseFirestore.instance
+          .collection('userIds')
+          .doc(loginId);
+      final created = await FirebaseFirestore.instance.runTransaction((
+        tx,
+      ) async {
         final existingUser = await tx.get(ref);
         if (existingUser.data()?['loginId'] is String) {
           tx.set(ref, data, SetOptions(merge: true));
@@ -124,7 +149,10 @@ class UserService {
         final existingId = await tx.get(idRef);
         if (existingId.exists) return false;
 
-        tx.set(idRef, {'uid': user.uid, 'createdAt': FieldValue.serverTimestamp()});
+        tx.set(idRef, {
+          'uid': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
         tx.set(ref, {
           ...data,
           'loginId': loginId,
@@ -145,7 +173,10 @@ class UserService {
         .get();
     final uid = idSnapshot.data()?['uid'] as String?;
     if (uid == null) return null;
-    final userSnapshot = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final userSnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     return userSnapshot.data()?['email'] as String?;
   }
 }
@@ -177,7 +208,8 @@ class _LoginScreenState extends State<LoginScreen> {
             'invalid-email' => 'Düzgün Gmail ünvanı yazın.',
             'email-already-in-use' => 'Bu Gmail artıq qeydiyyatdan keçib.',
             'weak-password' => 'Kod ən azı 6 simvol olmalıdır.',
-            'invalid-credential' || 'wrong-password' => 'Gmail/ID nömrəsi və ya kod yanlışdır.',
+            'invalid-credential' ||
+            'wrong-password' => 'Gmail/ID nömrəsi və ya kod yanlışdır.',
             _ => error.message ?? 'Giriş mümkün olmadı.',
           }
         : error.toString().replaceFirst('Exception: ', '');
@@ -201,16 +233,19 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isBusy = true);
     try {
       if (_isRegistering) {
-        final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: identifier,
-          password: password,
-        );
+        final credential = await FirebaseAuth.instance
+            .createUserWithEmailAndPassword(
+              email: identifier,
+              password: password,
+            );
         await UserService.upsertUser(credential.user!);
       } else {
         final email = identifier.contains('@')
             ? identifier
             : await UserService.findEmailForLoginId(identifier);
-        if (email == null) throw Exception('Bu ID nömrəsi ilə hesab tapılmadı.');
+        if (email == null) {
+          throw Exception('Bu ID nömrəsi ilə hesab tapılmadı.');
+        }
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
@@ -224,7 +259,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _sendPasswordResetEmail() async {
-    final controller = TextEditingController(text: _identifierController.text.trim());
+    final controller = TextEditingController(
+      text: _identifierController.text.trim(),
+    );
     final email = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -244,7 +281,8 @@ class _LoginScreenState extends State<LoginScreen> {
             child: const Text('Ləğv et'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Linki göndər'),
           ),
         ],
@@ -315,7 +353,9 @@ class _LoginScreenState extends State<LoginScreen> {
       final credential = GoogleAuthProvider.credential(idToken: idToken);
       await FirebaseAuth.instance.signInWithCredential(credential);
     } on GoogleSignInException catch (e) {
-      if (e.code == GoogleSignInExceptionCode.canceled) return;
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        return;
+      }
       messenger.showSnackBar(
         SnackBar(
           content: Text('Google girişi başarısız: ${e.description ?? e.code}'),
@@ -335,126 +375,177 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      // Sosial giriş düymələri ekranın aşağısında sabit qalır. Klaviatura
+      // açılanda yalnız form hissəsi daralır və sürüşür.
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: ListView(
-            children: [
-              const SizedBox(height: 48),
-              Image.asset('assets/logo.png', width: 120, height: 120),
-              const SizedBox(height: 32),
-              const Text(
-                'LifeGrapher',
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Hayatını takip et',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              const SizedBox(height: 40),
-              TextField(
-                controller: _identifierController,
-                keyboardType: _isRegistering ? TextInputType.emailAddress : TextInputType.text,
-                decoration: const InputDecoration(
-                  labelText: 'Gmail və ya ID nömrəsi',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                onSubmitted: (_) => _isBusy ? null : _signInWithEmailOrId(),
-                decoration: const InputDecoration(
-                  labelText: 'Kod',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_outline),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton(
-                  onPressed: _isBusy ? null : _signInWithEmailOrId,
-                  child: _isBusy
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(_isRegistering ? 'Qeydiyyatdan keç' : 'Daxil ol'),
-                ),
-              ),
-              TextButton(
-                onPressed: _isBusy
-                    ? null
-                    : () => setState(() => _isRegistering = !_isRegistering),
-                child: Text(
-                  _isRegistering
-                      ? 'Hesabın var? Daxil ol'
-                      : 'Yeni hesab yarat',
-                ),
-              ),
-              TextButton(
-                onPressed: _isBusy ? null : _sendPasswordResetEmail,
-                child: const Text('Şifrəni unutdun? Gmail ilə yenilə'),
-              ),
-              const Row(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
                 children: [
-                  Expanded(child: Divider()),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12), child: Text('və ya')),
-                  Expanded(child: Divider()),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: SignInWithAppleButton(
-                  onPressed: () => _signInWithApple(context),
-                  style: SignInWithAppleButtonStyle.black,
-                  borderRadius: const BorderRadius.all(Radius.circular(8)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: OutlinedButton(
-                  onPressed: () => _signInWithGoogle(context),
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Colors.black26),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SizedBox(height: 36),
+                          Center(
+                            child: Image.asset(
+                              'assets/logo.png',
+                              width: 100,
+                              height: 100,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          const Center(
+                            child: Text(
+                              'LifeGrapher',
+                              style: TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF176AB2),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Center(
+                            child: Text(
+                              'Həyatını izləməyə başla',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF5E7285),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+                          TextField(
+                            controller: _identifierController,
+                            keyboardType: _isRegistering
+                                ? TextInputType.emailAddress
+                                : TextInputType.text,
+                            decoration: const InputDecoration(
+                              labelText: 'Gmail və ya ID nömrəsi',
+                              prefixIcon: Icon(Icons.person_outline),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _passwordController,
+                            obscureText: true,
+                            onSubmitted: (_) =>
+                                _isBusy ? null : _signInWithEmailOrId(),
+                            decoration: const InputDecoration(
+                              labelText: 'Kod',
+                              prefixIcon: Icon(Icons.lock_outline),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            height: 50,
+                            child: FilledButton(
+                              onPressed: _isBusy ? null : _signInWithEmailOrId,
+                              child: _isBusy
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(
+                                      _isRegistering
+                                          ? 'Qeydiyyatdan keç'
+                                          : 'Daxil ol',
+                                    ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _isBusy
+                                ? null
+                                : () => setState(
+                                    () => _isRegistering = !_isRegistering,
+                                  ),
+                            child: Text(
+                              _isRegistering
+                                  ? 'Hesabın var? Daxil ol'
+                                  : 'Yeni hesab yarat',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _isBusy ? null : _sendPasswordResetEmail,
+                            child: const Text(
+                              'Şifrəni unutdun? Gmail ilə yenilə',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                      ),
                     ),
                   ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  const Row(
                     children: [
-                      Text(
-                        'G',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF4285F4),
-                        ),
+                      Expanded(child: Divider()),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('və ya'),
                       ),
-                      SizedBox(width: 10),
-                      Text(
-                        'Google ile giriş yap',
-                        style: TextStyle(fontSize: 16, color: Colors.black87),
-                      ),
+                      Expanded(child: Divider()),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: SignInWithAppleButton(
+                      onPressed: () => _signInWithApple(context),
+                      style: SignInWithAppleButtonStyle.black,
+                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: OutlinedButton(
+                      onPressed: () => _signInWithGoogle(context),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.black26),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'G',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF4285F4),
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'Google ilə daxil ol',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
-              const SizedBox(height: 32),
-            ],
+            ),
           ),
         ),
       ),
@@ -462,12 +553,18 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
     return Scaffold(
       appBar: AppBar(
         title: const Text('LifeGrapher'),
@@ -478,42 +575,548 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 64),
-            const SizedBox(height: 16),
-            Text(
-              'Hoş geldin!',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              user?.email ?? user?.uid ?? 'Kullanıcı',
-              style: const TextStyle(color: Colors.grey),
-            ),
-            if (user != null)
-              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user.uid)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  final loginId = snapshot.data?.data()?['loginId'] as String?;
-                  if (loginId == null) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 16),
-                    child: Text(
-                      'Sizin giriş ID nömrəniz: $loginId',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  );
-                },
-              ),
-          ],
-        ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: const [DashboardPage(), MealsPage(), SleepPage()],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) =>
+            setState(() => _selectedIndex = index),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: 'Panel',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.restaurant_outlined),
+            selectedIcon: Icon(Icons.restaurant),
+            label: 'Yeməklər',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bedtime_outlined),
+            selectedIcon: Icon(Icons.bedtime),
+            label: 'Yuxu',
+          ),
+        ],
       ),
     );
   }
+}
+
+CollectionReference<Map<String, dynamic>> _userCollection(String name) {
+  final uid = FirebaseAuth.instance.currentUser!.uid;
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .collection(name);
+}
+
+DateTime _startOfDay(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+String _twoDigits(int value) => value.toString().padLeft(2, '0');
+String _timeText(DateTime value) =>
+    '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
+
+class DashboardPage extends StatelessWidget {
+  const DashboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final today = _startOfDay(DateTime.now());
+    final tomorrow = today.add(const Duration(days: 1));
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _userCollection('meals')
+          .where('loggedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
+          .where('loggedAt', isLessThan: Timestamp.fromDate(tomorrow))
+          .snapshots(),
+      builder: (context, mealsSnapshot) {
+        final meals =
+            mealsSnapshot.data?.docs.map((doc) => doc.data()).toList() ?? [];
+        num sum(String key) => meals.fold<num>(
+          0,
+          (total, meal) => total + ((meal[key] as num?) ?? 0),
+        );
+        final calories = sum('calories');
+        final protein = sum('protein');
+        final carbs = sum('carbs');
+        final fat = sum('fat');
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _userCollection('sleep')
+              .where(
+                'wakeTime',
+                isGreaterThanOrEqualTo: Timestamp.fromDate(today),
+              )
+              .where('wakeTime', isLessThan: Timestamp.fromDate(tomorrow))
+              .snapshots(),
+          builder: (context, sleepSnapshot) {
+            final sleep =
+                sleepSnapshot.data?.docs.map((doc) => doc.data()).toList() ??
+                [];
+            final sleepMinutes = sleep.fold<int>(
+              0,
+              (total, item) =>
+                  total + ((item['durationMinutes'] as num?)?.toInt() ?? 0),
+            );
+            return ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                Text(
+                  'Bugünün xülasəsi',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 4),
+                const Text('Yemək və yuxu qeydlərin burada toplanır.'),
+                const SizedBox(height: 20),
+                _SummaryCard(
+                  icon: Icons.local_fire_department_outlined,
+                  title: 'Kalori',
+                  value: '${calories.toStringAsFixed(0)} kcal',
+                  subtitle: '${meals.length} yemək qeydi',
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Makrolar',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 17,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _Macro(
+                                label: 'Protein',
+                                value: '${protein.toStringAsFixed(0)} g',
+                                color: Colors.red,
+                              ),
+                            ),
+                            Expanded(
+                              child: _Macro(
+                                label: 'Karbohidrat',
+                                value: '${carbs.toStringAsFixed(0)} g',
+                                color: Colors.orange,
+                              ),
+                            ),
+                            Expanded(
+                              child: _Macro(
+                                label: 'Yağ',
+                                value: '${fat.toStringAsFixed(0)} g',
+                                color: Colors.blue,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _SummaryCard(
+                  icon: Icons.bedtime_outlined,
+                  title: 'Yuxu',
+                  value: '${(sleepMinutes / 60).toStringAsFixed(1)} saat',
+                  subtitle: '${sleep.length} yuxu qeydi',
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.subtitle,
+  });
+  final IconData icon;
+  final String title;
+  final String value;
+  final String subtitle;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      leading: Icon(
+        icon,
+        size: 32,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: Text(
+        value,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+      ),
+    ),
+  );
+}
+
+class _Macro extends StatelessWidget {
+  const _Macro({required this.label, required this.value, required this.color});
+  final String label;
+  final String value;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Text(
+        value,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.bold,
+          fontSize: 17,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 12),
+      ),
+    ],
+  );
+}
+
+class MealsPage extends StatelessWidget {
+  const MealsPage({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _userCollection('meals')
+            .orderBy('loggedAt', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Yemək qeydləri yüklənmədi.'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final meals = snapshot.data!.docs;
+          if (meals.isEmpty) {
+            return const _EmptyState(
+              icon: Icons.restaurant_outlined,
+              title: 'Hələ yemək qeydi yoxdur',
+              message: 'İlk yeməyini əlavə et.',
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: meals.length,
+            itemBuilder: (context, index) {
+              final data = meals[index].data();
+              final time = (data['loggedAt'] as Timestamp?)?.toDate();
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.restaurant),
+                  title: Text(data['name'] as String? ?? 'Yemək'),
+                  subtitle: Text(
+                    '${data['mealType'] ?? 'Yemək'}${time == null ? '' : ' • ${_timeText(time)}'}\nP: ${data['protein'] ?? 0}g  K: ${data['carbs'] ?? 0}g  Y: ${data['fat'] ?? 0}g',
+                  ),
+                  isThreeLine: true,
+                  trailing: Text(
+                    '${data['calories'] ?? 0}\nkcal',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showMealDialog(context),
+        icon: const Icon(Icons.add),
+        label: const Text('Yemək əlavə et'),
+      ),
+    );
+  }
+}
+
+class SleepPage extends StatelessWidget {
+  const SleepPage({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _userCollection('sleep')
+            .orderBy('wakeTime', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Yuxu qeydləri yüklənmədi.'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final entries = snapshot.data!.docs;
+          if (entries.isEmpty) {
+            return const _EmptyState(
+              icon: Icons.bedtime_outlined,
+              title: 'Hələ yuxu qeydi yoxdur',
+              message: 'Yuxu saatlarını əlavə et.',
+            );
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final data = entries[index].data();
+              final bed = (data['bedtime'] as Timestamp).toDate();
+              final wake = (data['wakeTime'] as Timestamp).toDate();
+              final minutes = (data['durationMinutes'] as num).toInt();
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.bedtime),
+                  title: Text('${_timeText(bed)} – ${_timeText(wake)}'),
+                  subtitle: Text('Keyfiyyət: ${data['quality']}/5'),
+                  trailing: Text(
+                    '${(minutes / 60).toStringAsFixed(1)}\nsaat',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showSleepDialog(context),
+        icon: const Icon(Icons.add),
+        label: const Text('Yuxu əlavə et'),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+  final IconData icon;
+  final String title;
+  final String message;
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(message, textAlign: TextAlign.center),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> _showMealDialog(BuildContext context) async {
+  final name = TextEditingController();
+  final calories = TextEditingController();
+  final protein = TextEditingController(text: '0');
+  final carbs = TextEditingController(text: '0');
+  final fat = TextEditingController(text: '0');
+  String mealType = 'Səhər yeməyi';
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Yemək əlavə et'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Yeməyin adı'),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: mealType,
+                decoration: const InputDecoration(labelText: 'Növ'),
+                items:
+                    const ['Səhər yeməyi', 'Nahar', 'Şam yeməyi', 'Ara yemək']
+                        .map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value),
+                          ),
+                        )
+                        .toList(),
+                onChanged: (value) => setDialogState(() => mealType = value!),
+              ),
+              TextField(
+                controller: calories,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Kalori (kcal)'),
+              ),
+              TextField(
+                controller: protein,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Protein (g)'),
+              ),
+              TextField(
+                controller: carbs,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Karbohidrat (g)'),
+              ),
+              TextField(
+                controller: fat,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Yağ (g)'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Ləğv et'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final calorieValue = double.tryParse(
+                calories.text.replaceAll(',', '.'),
+              );
+              if (name.text.trim().isEmpty || calorieValue == null) return;
+              await _userCollection('meals').add({
+                'name': name.text.trim(),
+                'mealType': mealType,
+                'calories': calorieValue,
+                'protein':
+                    double.tryParse(protein.text.replaceAll(',', '.')) ?? 0,
+                'carbs': double.tryParse(carbs.text.replaceAll(',', '.')) ?? 0,
+                'fat': double.tryParse(fat.text.replaceAll(',', '.')) ?? 0,
+                'loggedAt': Timestamp.now(),
+                'createdAt': FieldValue.serverTimestamp(),
+              });
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            },
+            child: const Text('Yadda saxla'),
+          ),
+        ],
+      ),
+    ),
+  );
+  name.dispose();
+  calories.dispose();
+  protein.dispose();
+  carbs.dispose();
+  fat.dispose();
+}
+
+Future<void> _showSleepDialog(BuildContext context) async {
+  DateTime bedtime = DateTime.now().subtract(const Duration(hours: 8));
+  DateTime wakeTime = DateTime.now();
+  int quality = 3;
+  Future<DateTime?> pick(DateTime current) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (date == null || !context.mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current),
+    );
+    return time == null
+        ? null
+        : DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Yuxu əlavə et'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Yatış saatı'),
+              subtitle: Text(
+                '${bedtime.day}.${bedtime.month}.${bedtime.year} • ${_timeText(bedtime)}',
+              ),
+              trailing: const Icon(Icons.edit),
+              onTap: () async {
+                final value = await pick(bedtime);
+                if (value != null) setDialogState(() => bedtime = value);
+              },
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Oyanış saatı'),
+              subtitle: Text(
+                '${wakeTime.day}.${wakeTime.month}.${wakeTime.year} • ${_timeText(wakeTime)}',
+              ),
+              trailing: const Icon(Icons.edit),
+              onTap: () async {
+                final value = await pick(wakeTime);
+                if (value != null) setDialogState(() => wakeTime = value);
+              },
+            ),
+            DropdownButtonFormField<int>(
+              initialValue: quality,
+              decoration: const InputDecoration(labelText: 'Yuxu keyfiyyəti'),
+              items: List.generate(
+                5,
+                (index) => DropdownMenuItem(
+                  value: index + 1,
+                  child: Text('${index + 1} / 5'),
+                ),
+              ),
+              onChanged: (value) => setDialogState(() => quality = value!),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Ləğv et'),
+          ),
+          FilledButton(
+            onPressed: wakeTime.isAfter(bedtime)
+                ? () async {
+                    await _userCollection('sleep').add({
+                      'bedtime': Timestamp.fromDate(bedtime),
+                      'wakeTime': Timestamp.fromDate(wakeTime),
+                      'durationMinutes': wakeTime.difference(bedtime).inMinutes,
+                      'quality': quality,
+                      'createdAt': FieldValue.serverTimestamp(),
+                    });
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  }
+                : null,
+            child: const Text('Yadda saxla'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
