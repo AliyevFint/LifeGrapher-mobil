@@ -566,18 +566,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('LifeGrapher'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('LifeGrapher')),
       body: IndexedStack(
         index: _selectedIndex,
-        children: const [DashboardPage(), MealsPage(), SleepPage()],
+        children: const [
+          DashboardPage(),
+          MealsPage(),
+          SleepPage(),
+          SettingsPage(),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
@@ -599,6 +596,11 @@ class _HomeScreenState extends State<HomeScreen> {
             selectedIcon: Icon(Icons.bedtime),
             label: 'Yuxu',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Ayarlar',
+          ),
         ],
       ),
     );
@@ -619,6 +621,121 @@ DateTime _startOfDay(DateTime value) =>
 String _twoDigits(int value) => value.toString().padLeft(2, '0');
 String _timeText(DateTime value) =>
     '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+
+  Future<void> _signOut(BuildContext context) async {
+    final shouldSignOut = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Hesabdan çıxış'),
+        content: const Text('Hesabdan çıxmaq istədiyinə əminsən?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Ləğv et'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Çıxış et'),
+          ),
+        ],
+      ),
+    );
+    if (shouldSignOut == true) {
+      await FirebaseAuth.instance.signOut();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const SizedBox.shrink();
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data?.data();
+        final loginId = profile?['loginId'] as String?;
+        return ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text('Ayarlar', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 20),
+            const _SettingsHeading('Hesab'),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.person_outline),
+                    title: Text(
+                      user.displayName?.isNotEmpty == true
+                          ? user.displayName!
+                          : 'LifeGrapher istifadəçisi',
+                    ),
+                    subtitle: Text(user.email ?? 'E-poçt məlumatı yoxdur'),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.pin_outlined),
+                    title: const Text('Giriş ID nömrəsi'),
+                    trailing: Text(loginId ?? 'Yüklənir'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            const _SettingsHeading('Tətbiq'),
+            Card(
+              child: Column(
+                children: const [
+                  ListTile(
+                    leading: Icon(Icons.language_outlined),
+                    title: Text('Dil'),
+                    trailing: Text('Azərbaycan dili'),
+                  ),
+                  Divider(height: 1),
+                  ListTile(
+                    leading: Icon(Icons.cloud_done_outlined),
+                    title: Text('Məlumatların saxlanması'),
+                    subtitle: Text(
+                      'Qeydləriniz təhlükəsiz şəkildə hesabınıza bağlı saxlanır',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            OutlinedButton.icon(
+              onPressed: () => _signOut(context),
+              icon: const Icon(Icons.logout, color: Colors.red),
+              label: const Text(
+                'Hesabdan çıxış et',
+                style: TextStyle(color: Colors.red),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SettingsHeading extends StatelessWidget {
+  const _SettingsHeading(this.text);
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 4, bottom: 8),
+    child: Text(text, style: Theme.of(context).textTheme.titleMedium),
+  );
+}
 
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
