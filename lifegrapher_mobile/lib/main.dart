@@ -648,6 +648,80 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
+  Future<void> _editGoals(
+    BuildContext context,
+    Map<String, dynamic>? profile,
+  ) async {
+    final calories = TextEditingController(
+      text: ((profile?['calorieGoal'] as num?)?.toInt() ?? 2000).toString(),
+    );
+    final sleepHours = TextEditingController(
+      text: (((profile?['sleepGoalMinutes'] as num?)?.toInt() ?? 480) / 60)
+          .toStringAsFixed(1),
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Gündəlik hədəflər'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: calories,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Kalori hədəfi (kcal)',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: sleepHours,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Yuxu hədəfi (saat)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Ləğv et'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final calorieGoal = double.tryParse(
+                calories.text.replaceAll(',', '.'),
+              );
+              final sleepGoal = double.tryParse(
+                sleepHours.text.replaceAll(',', '.'),
+              );
+              if (calorieGoal == null ||
+                  calorieGoal <= 0 ||
+                  sleepGoal == null ||
+                  sleepGoal <= 0) {
+                return;
+              }
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(FirebaseAuth.instance.currentUser!.uid)
+                  .set({
+                    'calorieGoal': calorieGoal,
+                    'sleepGoalMinutes': (sleepGoal * 60).round(),
+                  }, SetOptions(merge: true));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            },
+            child: const Text('Yadda saxla'),
+          ),
+        ],
+      ),
+    );
+    calories.dispose();
+    sleepHours.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -683,6 +757,36 @@ class SettingsPage extends StatelessWidget {
                     leading: const Icon(Icons.pin_outlined),
                     title: const Text('Giriş ID nömrəsi'),
                     trailing: Text(loginId ?? 'Yüklənir'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            const _SettingsHeading('Gündəlik hədəflər'),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.local_fire_department_outlined),
+                    title: const Text('Kalori hədəfi'),
+                    trailing: Text(
+                      '${((profile?['calorieGoal'] as num?)?.toInt() ?? 2000)} kcal',
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.bedtime_outlined),
+                    title: const Text('Yuxu hədəfi'),
+                    trailing: Text(
+                      '${(((profile?['sleepGoalMinutes'] as num?)?.toInt() ?? 480) / 60).toStringAsFixed(1)} saat',
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.edit_outlined),
+                    title: const Text('Hədəfləri dəyiş'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _editGoals(context, profile),
                   ),
                 ],
               ),
@@ -737,17 +841,45 @@ class _SettingsHeading extends StatelessWidget {
   );
 }
 
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
+
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+enum DashboardRange { daily, weekly, monthly, yearly }
+
+class _DashboardPageState extends State<DashboardPage> {
+  DashboardRange _range = DashboardRange.daily;
 
   @override
   Widget build(BuildContext context) {
     final today = _startOfDay(DateTime.now());
-    final tomorrow = today.add(const Duration(days: 1));
+    final start = switch (_range) {
+      DashboardRange.daily => today,
+      DashboardRange.weekly => today.subtract(
+        Duration(days: today.weekday - DateTime.monday),
+      ),
+      DashboardRange.monthly => DateTime(today.year, today.month),
+      DashboardRange.yearly => DateTime(today.year),
+    };
+    final end = switch (_range) {
+      DashboardRange.daily => start.add(const Duration(days: 1)),
+      DashboardRange.weekly => start.add(const Duration(days: 7)),
+      DashboardRange.monthly => DateTime(start.year, start.month + 1),
+      DashboardRange.yearly => DateTime(start.year + 1),
+    };
+    final period = switch (_range) {
+      DashboardRange.daily => 'Bugünün xülasəsi',
+      DashboardRange.weekly => 'Bu həftənin xülasəsi',
+      DashboardRange.monthly => 'Bu ayın xülasəsi',
+      DashboardRange.yearly => 'Bu ilin xülasəsi',
+    };
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _userCollection('meals')
-          .where('loggedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
-          .where('loggedAt', isLessThan: Timestamp.fromDate(tomorrow))
+          .where('loggedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+          .where('loggedAt', isLessThan: Timestamp.fromDate(end))
           .snapshots(),
       builder: (context, mealsSnapshot) {
         final meals =
@@ -764,9 +896,9 @@ class DashboardPage extends StatelessWidget {
           stream: _userCollection('sleep')
               .where(
                 'wakeTime',
-                isGreaterThanOrEqualTo: Timestamp.fromDate(today),
+                isGreaterThanOrEqualTo: Timestamp.fromDate(start),
               )
-              .where('wakeTime', isLessThan: Timestamp.fromDate(tomorrow))
+              .where('wakeTime', isLessThan: Timestamp.fromDate(end))
               .snapshots(),
           builder: (context, sleepSnapshot) {
             final sleep =
@@ -777,106 +909,190 @@ class DashboardPage extends StatelessWidget {
               (total, item) =>
                   total + ((item['durationMinutes'] as num?)?.toInt() ?? 0),
             );
-            return ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  'Bugünün xülasəsi',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 4),
-                const Text('Yemək və yuxu qeydlərin burada toplanır.'),
-                const SizedBox(height: 20),
-                _SummaryCard(
-                  icon: Icons.local_fire_department_outlined,
-                  title: 'Kalori',
-                  value: '${calories.toStringAsFixed(0)} kcal',
-                  subtitle: '${meals.length} yemək qeydi',
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            final user = FirebaseAuth.instance.currentUser!;
+            return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .snapshots(),
+              builder: (context, profileSnapshot) {
+                final profile = profileSnapshot.data?.data();
+                final calorieGoal =
+                    (profile?['calorieGoal'] as num?)?.toDouble() ?? 2000;
+                final sleepGoalMinutes =
+                    (profile?['sleepGoalMinutes'] as num?)?.toInt() ?? 480;
+                final goalMultiplier = end.difference(start).inDays;
+                final calorieTarget = calorieGoal * goalMultiplier;
+                final sleepTarget = sleepGoalMinutes * goalMultiplier;
+                return ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Text(
+                      period,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('Yemək və yuxu qeydlərin burada toplanır.'),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        const Text(
-                          'Makrolar',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 17,
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        Row(
+                        _rangeChip('Günlük', DashboardRange.daily),
+                        _rangeChip('Həftəlik', DashboardRange.weekly),
+                        _rangeChip('Aylıq', DashboardRange.monthly),
+                        _rangeChip('İllik', DashboardRange.yearly),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    _GoalSummaryCard(
+                      icon: Icons.local_fire_department_outlined,
+                      title: 'Kalori',
+                      value: '${calories.toStringAsFixed(0)} kcal',
+                      target: '${calorieTarget.toStringAsFixed(0)} kcal hədəf',
+                      progress: calorieTarget == 0
+                          ? 0
+                          : calories / calorieTarget,
+                      subtitle: '${meals.length} yemək qeydi',
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: _Macro(
-                                label: 'Protein',
-                                value: '${protein.toStringAsFixed(0)} g',
-                                color: Colors.red,
+                            const Text(
+                              'Makrolar',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 17,
                               ),
                             ),
-                            Expanded(
-                              child: _Macro(
-                                label: 'Karbohidrat',
-                                value: '${carbs.toStringAsFixed(0)} g',
-                                color: Colors.orange,
-                              ),
-                            ),
-                            Expanded(
-                              child: _Macro(
-                                label: 'Yağ',
-                                value: '${fat.toStringAsFixed(0)} g',
-                                color: Colors.blue,
-                              ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _Macro(
+                                    label: 'Protein',
+                                    value: '${protein.toStringAsFixed(0)} g',
+                                    color: Colors.red,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _Macro(
+                                    label: 'Karbohidrat',
+                                    value: '${carbs.toStringAsFixed(0)} g',
+                                    color: Colors.orange,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _Macro(
+                                    label: 'Yağ',
+                                    value: '${fat.toStringAsFixed(0)} g',
+                                    color: Colors.blue,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _SummaryCard(
-                  icon: Icons.bedtime_outlined,
-                  title: 'Yuxu',
-                  value: '${(sleepMinutes / 60).toStringAsFixed(1)} saat',
-                  subtitle: '${sleep.length} yuxu qeydi',
-                ),
-              ],
+                    const SizedBox(height: 12),
+                    _GoalSummaryCard(
+                      icon: Icons.bedtime_outlined,
+                      title: 'Yuxu',
+                      value: '${(sleepMinutes / 60).toStringAsFixed(1)} saat',
+                      target:
+                          '${(sleepTarget / 60).toStringAsFixed(1)} saat hədəf',
+                      progress: sleepTarget == 0
+                          ? 0
+                          : sleepMinutes / sleepTarget,
+                      subtitle: '${sleep.length} yuxu qeydi',
+                    ),
+                  ],
+                );
+              },
             );
           },
         );
       },
     );
   }
+
+  Widget _rangeChip(String label, DashboardRange value) => ChoiceChip(
+    label: Text(label),
+    selected: _range == value,
+    onSelected: (_) => setState(() => _range = value),
+  );
 }
 
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
+class _GoalSummaryCard extends StatelessWidget {
+  const _GoalSummaryCard({
     required this.icon,
     required this.title,
     required this.value,
+    required this.target,
+    required this.progress,
     required this.subtitle,
   });
   final IconData icon;
   final String title;
   final String value;
+  final String target;
+  final num progress;
   final String subtitle;
   @override
   Widget build(BuildContext context) => Card(
-    child: ListTile(
-      leading: Icon(
-        icon,
-        size: 32,
-        color: Theme.of(context).colorScheme.primary,
-      ),
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: Text(
-        value,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                icon,
+                size: 30,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 17,
+                      ),
+                    ),
+                    Text(subtitle),
+                  ],
+                ),
+              ),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: progress.clamp(0, 1).toDouble(),
+            minHeight: 8,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          const SizedBox(height: 7),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(target, style: const TextStyle(color: Colors.grey)),
+          ),
+        ],
       ),
     ),
   );
