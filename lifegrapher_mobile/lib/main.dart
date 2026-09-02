@@ -17,7 +17,10 @@ Future<void> main() async {
 }
 
 class LifeGrapherApp extends StatelessWidget {
-  const LifeGrapherApp({super.key});
+  const LifeGrapherApp({super.key, this.home});
+
+  /// Allows widget tests to render the app shell without Firebase services.
+  final Widget? home;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +56,7 @@ class LifeGrapherApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const AuthGate(),
+      home: home ?? const AuthGate(),
     );
   }
 }

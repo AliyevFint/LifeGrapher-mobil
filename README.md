@@ -2,13 +2,15 @@
 
 LifeGrapher is now a Flutter-only mobile app for tracking daily nutrition, hydration, sleep, and personal goals. The former Next.js web application has been removed.
 
-## Features
+## Current MVP Features
 
-- Local sign-in/profile setup
-- Daily calorie summary and meal logging
-- Hydration tracker
-- Sleep duration and quality tracker
-- Persistent on-device data storage
+- E-poçt/şifrə, Google və Apple ilə giriş
+- Firebase Authentication ilə hesab idarəetməsi
+- Manual yemək qeydi: yemək adı, növü, kalori, protein, karbohidrat və yağ
+- Yuxu qeydi: yatış/oyanış saatı, avtomatik müddət və 1–5 keyfiyyət balı
+- Günlük, həftəlik, aylıq və illik panel görünüşü
+- Ayarlardan dəyişdirilə bilən gündəlik kalori və yuxu hədəfləri
+- Firebase Firestore-da istifadəçiyə aid, host edilmiş və qalıcı məlumat saxlanması
 
 ## Run on an iOS Simulator or Android Emulator
 
@@ -16,6 +18,14 @@ LifeGrapher is now a Flutter-only mobile app for tracking daily nutrition, hydra
 2. Start an available iOS Simulator or Android Emulator.
 3. Run `flutter pub get` once.
 4. Run `flutter run`.
+
+## 3-cü həftə demo axını
+
+1. Yeni hesab yarat və ya mövcud hesabla daxil ol.
+2. **Yeməklər** bölməsindən ən azı bir yemək qeydi əlavə et.
+3. **Yuxu** bölməsindən yatış, oyanış və keyfiyyət məlumatı ilə bir yuxu qeydi əlavə et.
+4. **Panel** bölməsində gündəlik nəticələri gör.
+5. Tətbiqi bağlayıb yenidən aç: qeydlər Firestore-dan yenidən yüklənir.
 
 The mobile entry point is `lifegrapher_mobile/lib/main.dart`.
 
