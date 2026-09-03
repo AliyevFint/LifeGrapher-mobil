@@ -24,3 +24,4 @@ To https://github.com/AliyevFint/LifeGrapher-mobil.git
    7dbeca6..1bf8c82  main -> main
 To https://github.com/AliyevFint/LifeGrapher-mobil.git
    1bf8c82..eae700f  main -> main
+fatal: unable to access 'https://github.com/AliyevFint/LifeGrapher-mobil.git/': Could not resolve host: github.com
