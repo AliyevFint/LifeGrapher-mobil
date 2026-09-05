@@ -1,1 +1,33 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"lifegrapher","appId":"1:1004701897326:android:b41e1c353dd27c8cbbcc7f","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"lifegrapher","appId":"1:1004701897326:ios:4ee82901437e7a0bbbcc7f","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"lifegrapher","configurations":{"android":"1:1004701897326:android:b41e1c353dd27c8cbbcc7f","ios":"1:1004701897326:ios:4ee82901437e7a0bbbcc7f"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "lifegrapher",
+          "appId": "1:1004701897326:android:b41e1c353dd27c8cbbcc7f",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "lifegrapher",
+          "appId": "1:1004701897326:ios:4ee82901437e7a0bbbcc7f",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "lifegrapher",
+          "configurations": {
+            "android": "1:1004701897326:android:b41e1c353dd27c8cbbcc7f",
+            "ios": "1:1004701897326:ios:4ee82901437e7a0bbbcc7f"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}

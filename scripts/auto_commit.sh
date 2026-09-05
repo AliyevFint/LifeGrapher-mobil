@@ -3,8 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  git add -A
+if [[ -n "$(git status --porcelain -- . ':(exclude)logs/*.log')" ]]; then
+  # Runtime logs are evidence for troubleshooting, not source changes. Leaving
+  # them out avoids empty daily commits caused solely by scheduler output.
+  git add -A -- . ':(exclude)logs/*.log'
   git commit -m "chore: daily timeline update $(date +%Y-%m-%d)"
   git push
   echo "Changes committed and pushed."

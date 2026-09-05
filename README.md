@@ -2,32 +2,34 @@
 
 LifeGrapher is now a Flutter-only mobile app for tracking daily nutrition, hydration, sleep, and personal goals. The former Next.js web application has been removed.
 
-## Current MVP Features
+## Current Features
 
-- E-poçt/şifrə, Google və Apple ilə giriş
-- Firebase Authentication ilə hesab idarəetməsi
-- Manual yemək qeydi: yemək adı, növü, kalori, protein, karbohidrat və yağ
-- Yuxu qeydi: yatış/oyanış saatı, avtomatik müddət və 1–5 keyfiyyət balı
-- Günlük, həftəlik, aylıq və illik panel görünüşü
-- Ayarlardan dəyişdirilə bilən gündəlik kalori və yuxu hədəfləri
-- Firebase Firestore-da istifadəçiyə aid, host edilmiş və qalıcı məlumat saxlanması
+- Azərbaycan, İngilis, Türk, Alman və Rus dilləri. Giriş ekranından və **Ayarlar → Dil** bölməsindən dəyişdirilir; seçim cihazda saxlanır. Tarix/saat pəncərələri, rəqəmlər, formalar və bildirişlər seçilən dilə uyğun göstərilir.
 
-## Run on an iOS Simulator or Android Emulator
+- Firebase Authentication ilə e-poçt/şifrə, Google və Apple giriş interfeysləri.
+- Admin hesabı üçün `34555` giriş ID-si; digər hesablara cihazda avtomatik ID.
+- Yemək adı, növü, kalori və makroların qeyd edilməsi.
+- Yuxu saatları, müddət və 1–5 keyfiyyət balı.
+- Gündəlik/həftəlik/aylıq/illik panel və dəyişdirilə bilən hədəflər.
+- Yemək, yuxu, profil və hədəflər tətbiqin telefon yaddaşındakı qovluğuna yazılır. Saxlama server cavabını gözləmir; uğur yalnız disk yazısı tamamlananda göstərilir.
+- Məlumatlar Firebase UID-si üzrə ayrı fayllarda saxlanır və tətbiq yenidən açıldıqda qalır.
+- Əvvəlki Firestore versiyasının cihazda keşlənmiş yemək/yuxu qeydləri bir dəfə yerli yaddaşa daşınır.
 
-1. Open the `lifegrapher_mobile` directory in VS Code.
-2. Start an available iOS Simulator or Android Emulator.
-3. Run `flutter pub get` once.
-4. Run `flutter run`.
+Yeni hesaba giriş üçün internet lazımdır. Yerli ID başqa cihazda tanınmırsa, e-poçtla daxil olun. Yerli qeydlər cihazlar arasında sinxronlaşmır; tətbiqi silmək yerli məlumatları silə bilər.
 
-## 3-cü həftə demo axını
+## Run
 
-1. Yeni hesab yarat və ya mövcud hesabla daxil ol.
-2. **Yeməklər** bölməsindən ən azı bir yemək qeydi əlavə et.
-3. **Yuxu** bölməsindən yatış, oyanış və keyfiyyət məlumatı ilə bir yuxu qeydi əlavə et.
-4. **Panel** bölməsində gündəlik nəticələri gör.
-5. Tətbiqi bağlayıb yenidən aç: qeydlər Firestore-dan yenidən yüklənir.
+```bash
+cd lifegrapher_mobile
+flutter pub get
+flutter run
+```
 
-The mobile entry point is `lifegrapher_mobile/lib/main.dart`.
+`path_provider_foundation` və `path_provider_android` versiyaları layihənin mövcud Flutter/native-assets alətləri ilə uyğunluq üçün sabitlənib.
+
+## 3-cü həftə
+
+İstifadəçinin son istəyinə əsasən saxlama telefon yaddaşına keçirilib. Bu rejim müqavilədəki hosted verilənlər bazası tələbini ödəmir. Bulud bazası qurulması və canlı nümayiş tamamlanmış kimi qeyd edilmir. Tarixi yoxlamalar: [yoxlama qeydi](notes/week-3-verification.md).
 
 ## Deadline Tracking Program
 

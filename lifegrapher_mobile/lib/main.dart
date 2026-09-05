@@ -1,18 +1,25 @@
 import 'dart:async';
+
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
+import 'app_language.dart';
 import 'firebase_options.dart';
+import 'entry_page.dart';
+import 'local_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await LocalStore.initialize();
+  await appLanguage.initialize(LocalStore.instance.directory.parent);
   runApp(const LifeGrapherApp());
 }
 
@@ -27,36 +34,44 @@ class LifeGrapherApp extends StatelessWidget {
     const primaryBlue = Color(0xFF1877C9);
     const leafGreen = Color(0xFF39A852);
     const pageBackground = Color(0xFFF5FAFF);
-    return MaterialApp(
-      title: 'LifeGrapher',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: primaryBlue,
-          brightness: Brightness.light,
-        ).copyWith(secondary: leafGreen, surface: pageBackground),
-        useMaterial3: true,
-        scaffoldBackgroundColor: pageBackground,
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          prefixIconColor: primaryBlue,
-          labelStyle: const TextStyle(color: primaryBlue),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFB9D7F2)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFB9D7F2)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: primaryBlue, width: 2),
+    return ValueListenableBuilder<Locale>(
+      valueListenable: appLanguage,
+      builder: (context, locale, _) => MaterialApp(
+        locale: locale,
+        supportedLocales: languageNames.keys
+            .map((code) => Locale(code))
+            .toList(),
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        title: 'LifeGrapher',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: primaryBlue,
+            brightness: Brightness.light,
+          ).copyWith(secondary: leafGreen, surface: pageBackground),
+          useMaterial3: true,
+          scaffoldBackgroundColor: pageBackground,
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            prefixIconColor: primaryBlue,
+            labelStyle: TextStyle(color: primaryBlue),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Color(0xFFB9D7F2)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Color(0xFFB9D7F2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: primaryBlue, width: 2),
+            ),
           ),
         ),
+        home: home ?? AuthGate(),
       ),
-      home: home ?? const AuthGate(),
     );
   }
 }
@@ -78,8 +93,12 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     _subscription = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (user != null) {
-        // Kullanıcıyı Firestore'a kaydet / güncelle.
-        UserService.upsertUser(user);
+        // Keep the account profile on this device.
+        unawaited(
+          UserService.upsertUser(user).catchError((Object error) {
+            debugPrint('Profil yenilənmədi: $error');
+          }),
+        );
       }
       if (mounted) {
         setState(() {
@@ -99,17 +118,21 @@ class _AuthGateState extends State<AuthGate> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_user != null) {
-      return const HomeScreen();
+      return HomeScreen();
     }
-    return const LoginScreen();
+    return LoginScreen();
   }
 }
 
-/// Firestore'da `users/{uid}` dokümanını oluşturur veya günceller.
+/// Maintains account-specific profiles on this device.
 class UserService {
+  static const adminUid = 'jJuNOAXRwZcsU3JXMsTRz8BnD4s1';
+  static const adminLoginId = '34555';
+  static const adminEmail = 'ismayil.aliyevev@gmail.com';
+
   /// Uses a separate, random numeric ID so people can sign in without typing
   /// their email address. The ID is never used as a Firebase password.
   static String _newLoginId() {
@@ -118,69 +141,59 @@ class UserService {
   }
 
   static Future<void> upsertUser(User user) async {
-    final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
-    final data = <String, dynamic>{
+    final store = LocalStore.instance;
+    final existing = await store.read(user.uid);
+    final profile = Map<String, dynamic>.from(existing['profile'] as Map);
+    String? loginId = profile['loginId'] as String?;
+    if (user.uid == adminUid) {
+      loginId = adminLoginId;
+    } else if (loginId == null) {
+      do {
+        loginId = _newLoginId();
+      } while (await store.emailForId(loginId) != null);
+    }
+    await store.saveProfile(user.uid, {
       'email': user.email,
       'displayName': user.displayName,
       'photoURL': user.photoURL,
-      'providers': user.providerData.map((p) => p.providerId).toList(),
-      'lastLoginAt': FieldValue.serverTimestamp(),
-    };
-    final snapshot = await ref.get();
-    // Keep the original ID forever. Profiles created before this feature have
-    // no loginId yet, so they receive one exactly once below.
-    if (snapshot.data()?['loginId'] is String) {
-      await ref.set(data, SetOptions(merge: true));
-      return;
-    }
+      'loginId': loginId,
+    });
+    unawaited(_importCachedRecords(user.uid));
+  }
 
-    // `userIds/{loginId}` reserves the value, avoiding an accidental ID
-    // collision even when two users sign up at the same time.
-    for (var attempt = 0; attempt < 10; attempt++) {
-      final loginId = _newLoginId();
-      final idRef = FirebaseFirestore.instance
-          .collection('userIds')
-          .doc(loginId);
-      final created = await FirebaseFirestore.instance.runTransaction((
-        tx,
-      ) async {
-        final existingUser = await tx.get(ref);
-        if (existingUser.data()?['loginId'] is String) {
-          tx.set(ref, data, SetOptions(merge: true));
-          return true;
+  static Future<void> _importCachedRecords(String uid) async {
+    // Recover records queued by the earlier Firestore version without waiting
+    // for the network. Existing local records always take precedence.
+    try {
+      final store = LocalStore.instance;
+      final state = await store.read(uid);
+      if ((state['profile'] as Map)['cacheImported'] == true) return;
+      final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+      final cached = <String, Map<String, dynamic>>{};
+      for (final name in ['meals', 'sleep']) {
+        final result = await ref
+            .collection(name)
+            .get(GetOptions(source: Source.cache));
+        cached[name] = {for (final doc in result.docs) doc.id: doc.data()};
+      }
+      await store.update(uid, (current) {
+        for (final name in ['meals', 'sleep']) {
+          current[name] = {
+            ...cached[name]!,
+            ...Map<String, dynamic>.from(current[name] as Map),
+          };
         }
-        final existingId = await tx.get(idRef);
-        if (existingId.exists) return false;
-
-        tx.set(idRef, {
-          'uid': user.uid,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-        tx.set(ref, {
-          ...data,
-          'loginId': loginId,
-          if (!existingUser.exists) 'createdAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: existingUser.exists));
-        return true;
+        (current['profile'] as Map)['cacheImported'] = true;
       });
-      if (created) return;
+    } catch (_) {
+      // No previous cache is normal on a fresh installation.
     }
-
-    throw StateError('Unikal giriş nömrəsi yaradıla bilmədi.');
   }
 
   static Future<String?> findEmailForLoginId(String loginId) async {
-    final idSnapshot = await FirebaseFirestore.instance
-        .collection('userIds')
-        .doc(loginId)
-        .get();
-    final uid = idSnapshot.data()?['uid'] as String?;
-    if (uid == null) return null;
-    final userSnapshot = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
-    return userSnapshot.data()?['email'] as String?;
+    if (loginId.trim() == adminLoginId) return adminEmail;
+    if (!RegExp(r'^\d{9}$').hasMatch(loginId.trim())) return null;
+    return LocalStore.instance.emailForId(loginId.trim());
   }
 }
 
@@ -208,14 +221,24 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     final message = error is FirebaseAuthException
         ? switch (error.code) {
-            'invalid-email' => 'Düzgün Gmail ünvanı yazın.',
-            'email-already-in-use' => 'Bu Gmail artıq qeydiyyatdan keçib.',
-            'weak-password' => 'Kod ən azı 6 simvol olmalıdır.',
-            'invalid-credential' ||
-            'wrong-password' => 'Gmail/ID nömrəsi və ya kod yanlışdır.',
-            _ => error.message ?? 'Giriş mümkün olmadı.',
+            'invalid-email' => tr(context, "Düzgün Gmail ünvanı yazın."),
+            'email-already-in-use' => tr(
+              context,
+              "Bu Gmail artıq qeydiyyatdan keçib.",
+            ),
+            'weak-password' => tr(context, "Kod ən azı 6 simvol olmalıdır."),
+            'invalid-credential' || 'wrong-password' => tr(
+              context,
+              "Gmail/ID nömrəsi və ya kod yanlışdır.",
+            ),
+            'network-request-failed' => tr(context, 'networkError'),
+            'too-many-requests' => tr(context, 'tooManyRequests'),
+            'user-disabled' => tr(context, 'accountDisabled'),
+            _ => tr(context, "Giriş mümkün olmadı."),
           }
-        : error.toString().replaceFirst('Exception: ', '');
+        : error is Exception && error.toString().startsWith('Exception: ')
+        ? error.toString().replaceFirst('Exception: ', '')
+        : tr(context, 'Giriş mümkün olmadı.');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
@@ -225,29 +248,33 @@ class _LoginScreenState extends State<LoginScreen> {
     final identifier = _identifierController.text.trim();
     final password = _passwordController.text;
     if (identifier.isEmpty || password.isEmpty) {
-      _showError(Exception('Gmail/ID nömrəsi və kodu yazın.'));
+      _showError(Exception(tr(context, "Gmail/ID nömrəsi və kodu yazın.")));
       return;
     }
     if (_isRegistering && !identifier.contains('@')) {
-      _showError(Exception('Qeydiyyat üçün Gmail ünvanı yazın.'));
+      _showError(Exception(tr(context, "Qeydiyyat üçün Gmail ünvanı yazın.")));
       return;
     }
 
     setState(() => _isBusy = true);
     try {
       if (_isRegistering) {
-        final credential = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-              email: identifier,
-              password: password,
-            );
-        await UserService.upsertUser(credential.user!);
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: identifier,
+          password: password,
+        );
       } else {
         final email = identifier.contains('@')
             ? identifier
             : await UserService.findEmailForLoginId(identifier);
+        if (!mounted) return;
         if (email == null) {
-          throw Exception('Bu ID nömrəsi ilə hesab tapılmadı.');
+          throw Exception(
+            tr(
+              context,
+              "Bu ID tapılmadı. Admin ID-si 34555-dir. Digər hesablar üçün e-poçtla daxil ola bilərsiniz.",
+            ),
+          );
         }
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
@@ -268,40 +295,44 @@ class _LoginScreenState extends State<LoginScreen> {
     final email = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Şifrəni yenilə'),
+        title: Text(tr(context, "Şifrəni yenilə")),
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.emailAddress,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Gmail ünvanı',
+          decoration: InputDecoration(
+            labelText: tr(context, "Gmail ünvanı"),
             hintText: 'ad@gmail.com',
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Ləğv et'),
+            child: Text(tr(context, "Ləğv et")),
           ),
           FilledButton(
             onPressed: () =>
                 Navigator.pop(dialogContext, controller.text.trim()),
-            child: const Text('Linki göndər'),
+            child: Text(tr(context, "Linki göndər")),
           ),
         ],
       ),
     );
     // AlertDialog is removed with an animation; dispose after it unmounts.
-    Future<void>.delayed(const Duration(milliseconds: 350), controller.dispose);
+    Future<void>.delayed(Duration(milliseconds: 350), controller.dispose);
     if (email == null || email.isEmpty) return;
 
     try {
-      await FirebaseAuth.instance.setLanguageCode('az');
+      await FirebaseAuth.instance.setLanguageCode(
+        appLanguage.value.languageCode,
+      );
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Parol yeniləmə linki Gmail ünvanınıza göndərildi.'),
+        SnackBar(
+          content: Text(
+            tr(context, "Parol yeniləmə linki Gmail ünvanınıza göndərildi."),
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -312,6 +343,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _signInWithApple(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
+    final failureMessage = tr(context, "Giriş mümkün olmadı.");
     try {
       final appleCredential = await SignInWithApple.getAppleIDCredential(
         scopes: [
@@ -329,23 +361,18 @@ class _LoginScreenState extends State<LoginScreen> {
     } on SignInWithAppleAuthorizationException catch (e) {
       if (e.code == AuthorizationErrorCode.canceled) return;
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Apple girişi başarısız: ${e.message}'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(failureMessage), backgroundColor: Colors.red),
       );
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Giriş hatası: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(failureMessage), backgroundColor: Colors.red),
       );
     }
   }
 
   Future<void> _signInWithGoogle(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
+    final failureMessage = tr(context, "Giriş mümkün olmadı.");
     try {
       await GoogleSignIn.instance.initialize();
       final account = await GoogleSignIn.instance.authenticate();
@@ -360,17 +387,11 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Google girişi başarısız: ${e.description ?? e.code}'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(failureMessage), backgroundColor: Colors.red),
       );
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Giriş hatası: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(failureMessage), backgroundColor: Colors.red),
       );
     }
   }
@@ -384,9 +405,9 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: BoxConstraints(maxWidth: 480),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+              padding: EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 children: [
                   Expanded(
@@ -396,7 +417,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const SizedBox(height: 36),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: LanguagePicker(compact: true),
+                          ),
+                          SizedBox(height: 12),
                           Center(
                             child: Image.asset(
                               'assets/logo.png',
@@ -404,8 +429,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               height: 100,
                             ),
                           ),
-                          const SizedBox(height: 20),
-                          const Center(
+                          SizedBox(height: 20),
+                          Center(
                             child: Text(
                               'LifeGrapher',
                               style: TextStyle(
@@ -415,45 +440,45 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          const Center(
+                          SizedBox(height: 8),
+                          Center(
                             child: Text(
-                              'Həyatını izləməyə başla',
+                              tr(context, "Həyatını izləməyə başla"),
                               style: TextStyle(
                                 fontSize: 16,
                                 color: Color(0xFF5E7285),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 32),
+                          SizedBox(height: 32),
                           TextField(
                             controller: _identifierController,
                             keyboardType: _isRegistering
                                 ? TextInputType.emailAddress
                                 : TextInputType.text,
-                            decoration: const InputDecoration(
-                              labelText: 'Gmail və ya ID nömrəsi',
+                            decoration: InputDecoration(
+                              labelText: tr(context, "Gmail və ya ID nömrəsi"),
                               prefixIcon: Icon(Icons.person_outline),
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          SizedBox(height: 12),
                           TextField(
                             controller: _passwordController,
                             obscureText: true,
                             onSubmitted: (_) =>
                                 _isBusy ? null : _signInWithEmailOrId(),
-                            decoration: const InputDecoration(
-                              labelText: 'Kod',
+                            decoration: InputDecoration(
+                              labelText: tr(context, "Kod"),
                               prefixIcon: Icon(Icons.lock_outline),
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          SizedBox(height: 16),
                           SizedBox(
                             height: 50,
                             child: FilledButton(
                               onPressed: _isBusy ? null : _signInWithEmailOrId,
                               child: _isBusy
-                                  ? const SizedBox(
+                                  ? SizedBox(
                                       width: 22,
                                       height: 22,
                                       child: CircularProgressIndicator(
@@ -462,8 +487,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                     )
                                   : Text(
                                       _isRegistering
-                                          ? 'Qeydiyyatdan keç'
-                                          : 'Daxil ol',
+                                          ? tr(context, "Qeydiyyatdan keç")
+                                          : tr(context, "Daxil ol"),
                                     ),
                             ),
                           ),
@@ -475,54 +500,55 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                             child: Text(
                               _isRegistering
-                                  ? 'Hesabın var? Daxil ol'
-                                  : 'Yeni hesab yarat',
+                                  ? tr(context, "Hesabın var? Daxil ol")
+                                  : tr(context, "Yeni hesab yarat"),
                             ),
                           ),
                           TextButton(
                             onPressed: _isBusy ? null : _sendPasswordResetEmail,
-                            child: const Text(
-                              'Şifrəni unutdun? Gmail ilə yenilə',
+                            child: Text(
+                              tr(context, "Şifrəni unutdun? Gmail ilə yenilə"),
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          SizedBox(height: 12),
                         ],
                       ),
                     ),
                   ),
-                  const Row(
+                  Row(
                     children: [
                       Expanded(child: Divider()),
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('və ya'),
+                        child: Text(tr(context, "və ya")),
                       ),
                       Expanded(child: Divider()),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: SignInWithAppleButton(
+                      text: tr(context, "Apple ilə daxil ol"),
                       onPressed: () => _signInWithApple(context),
                       style: SignInWithAppleButtonStyle.black,
-                      borderRadius: const BorderRadius.all(Radius.circular(8)),
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
                     child: OutlinedButton(
                       onPressed: () => _signInWithGoogle(context),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.black26),
+                        side: BorderSide(color: Colors.black26),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
@@ -534,18 +560,21 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           SizedBox(width: 10),
-                          Text(
-                            'Google ilə daxil ol',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.black87,
+                          Flexible(
+                            child: Text(
+                              tr(context, "Google ilə daxil ol"),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.black87,
+                              ),
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  SizedBox(height: 16),
                 ],
               ),
             ),
@@ -569,40 +598,34 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('LifeGrapher')),
+      appBar: AppBar(title: Text('LifeGrapher')),
       body: IndexedStack(
         index: _selectedIndex,
-        children: const [
-          DashboardPage(),
-          MealsPage(),
-          SleepPage(),
-          SettingsPage(),
+        children: [
+          const DashboardPage(),
+          const AddPage(),
+          const SettingsPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) =>
             setState(() => _selectedIndex = index),
-        destinations: const [
+        destinations: [
           NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard),
-            label: 'Panel',
+            label: tr(context, "Panel"),
           ),
           NavigationDestination(
-            icon: Icon(Icons.restaurant_outlined),
-            selectedIcon: Icon(Icons.restaurant),
-            label: 'Yeməklər',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.bedtime_outlined),
-            selectedIcon: Icon(Icons.bedtime),
-            label: 'Yuxu',
+            icon: Icon(Icons.add_circle_outline),
+            selectedIcon: Icon(Icons.add_circle),
+            label: tr(context, "Əlavə et"),
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),
-            label: 'Ayarlar',
+            label: tr(context, "Ayarlar"),
           ),
         ],
       ),
@@ -610,20 +633,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-CollectionReference<Map<String, dynamic>> _userCollection(String name) {
-  final uid = FirebaseAuth.instance.currentUser!.uid;
-  return FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .collection(name);
-}
+LocalCollection _userCollection(String name) => LocalStore.instance.collection(
+  FirebaseAuth.instance.currentUser!.uid,
+  name,
+);
 
 DateTime _startOfDay(DateTime value) =>
     DateTime(value.year, value.month, value.day);
 
-String _twoDigits(int value) => value.toString().padLeft(2, '0');
-String _timeText(DateTime value) =>
-    '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}';
+String _timeText(BuildContext context, DateTime value) =>
+    MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(value),
+      alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+    );
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -632,16 +654,16 @@ class SettingsPage extends StatelessWidget {
     final shouldSignOut = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Hesabdan çıxış'),
-        content: const Text('Hesabdan çıxmaq istədiyinə əminsən?'),
+        title: Text(tr(context, "Hesabdan çıxış")),
+        content: Text(tr(context, "Hesabdan çıxmaq istədiyinə əminsən?")),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Ləğv et'),
+            child: Text(tr(context, "Ləğv et")),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Çıxış et'),
+            child: Text(tr(context, "Çıxış et")),
           ),
         ],
       ),
@@ -654,177 +676,120 @@ class SettingsPage extends StatelessWidget {
   Future<void> _editGoals(
     BuildContext context,
     Map<String, dynamic>? profile,
-  ) async {
-    final calories = TextEditingController(
-      text: ((profile?['calorieGoal'] as num?)?.toInt() ?? 2000).toString(),
-    );
-    final sleepHours = TextEditingController(
-      text: (((profile?['sleepGoalMinutes'] as num?)?.toInt() ?? 480) / 60)
-          .toStringAsFixed(1),
-    );
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Gündəlik hədəflər'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: calories,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Kalori hədəfi (kcal)',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: sleepHours,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: const InputDecoration(
-                labelText: 'Yuxu hədəfi (saat)',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Ləğv et'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final calorieGoal = double.tryParse(
-                calories.text.replaceAll(',', '.'),
-              );
-              final sleepGoal = double.tryParse(
-                sleepHours.text.replaceAll(',', '.'),
-              );
-              if (calorieGoal == null ||
-                  calorieGoal <= 0 ||
-                  sleepGoal == null ||
-                  sleepGoal <= 0) {
-                return;
-              }
-              await FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(FirebaseAuth.instance.currentUser!.uid)
-                  .set({
-                    'calorieGoal': calorieGoal,
-                    'sleepGoalMinutes': (sleepGoal * 60).round(),
-                  }, SetOptions(merge: true));
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
-            },
-            child: const Text('Yadda saxla'),
-          ),
-        ],
-      ),
-    );
-    calories.dispose();
-    sleepHours.dispose();
-  }
+  ) => _showEntryPage(context, EntryKind.goals, profile: profile);
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const SizedBox.shrink();
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .snapshots(),
+    if (user == null) return SizedBox.shrink();
+    return StreamBuilder<LocalProfileSnapshot>(
+      stream: LocalStore.instance.profile(user.uid),
       builder: (context, snapshot) {
         final profile = snapshot.data?.data();
-        final loginId = profile?['loginId'] as String?;
+        final loginId = user.uid == UserService.adminUid
+            ? UserService.adminLoginId
+            : profile?['loginId'] as String?;
         return ListView(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(20),
           children: [
-            Text('Ayarlar', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 20),
-            const _SettingsHeading('Hesab'),
+            Text(
+              tr(context, "Ayarlar"),
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            SizedBox(height: 20),
+            _SettingsHeading(tr(context, "Hesab")),
             Card(
               child: Column(
                 children: [
                   ListTile(
-                    leading: const Icon(Icons.person_outline),
+                    leading: Icon(Icons.person_outline),
                     title: Text(
                       user.displayName?.isNotEmpty == true
                           ? user.displayName!
-                          : 'LifeGrapher istifadəçisi',
+                          : tr(context, "LifeGrapher istifadəçisi"),
                     ),
-                    subtitle: Text(user.email ?? 'E-poçt məlumatı yoxdur'),
+                    subtitle: Text(
+                      user.email ?? tr(context, "E-poçt məlumatı yoxdur"),
+                    ),
                   ),
-                  const Divider(height: 1),
+                  Divider(height: 1),
                   ListTile(
-                    leading: const Icon(Icons.pin_outlined),
-                    title: const Text('Giriş ID nömrəsi'),
-                    trailing: Text(loginId ?? 'Yüklənir'),
+                    leading: Icon(Icons.pin_outlined),
+                    title: Text(tr(context, "Giriş ID nömrəsi")),
+                    trailing: Text(loginId ?? tr(context, "Yüklənir")),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            const _SettingsHeading('Gündəlik hədəflər'),
+            SizedBox(height: 20),
+            _SettingsHeading(tr(context, "Gündəlik hədəflər")),
             Card(
               child: Column(
                 children: [
                   ListTile(
-                    leading: const Icon(Icons.local_fire_department_outlined),
-                    title: const Text('Kalori hədəfi'),
+                    leading: Icon(Icons.local_fire_department_outlined),
+                    title: Text(tr(context, "Kalori hədəfi")),
                     trailing: Text(
-                      '${((profile?['calorieGoal'] as num?)?.toInt() ?? 2000)} kcal',
+                      amount(
+                        context,
+                        'kcalValue',
+                        (profile?['calorieGoal'] as num?) ?? 2000,
+                      ),
                     ),
                   ),
-                  const Divider(height: 1),
+                  Divider(height: 1),
                   ListTile(
-                    leading: const Icon(Icons.bedtime_outlined),
-                    title: const Text('Yuxu hədəfi'),
+                    leading: Icon(Icons.bedtime_outlined),
+                    title: Text(tr(context, "Yuxu hədəfi")),
                     trailing: Text(
-                      '${(((profile?['sleepGoalMinutes'] as num?)?.toInt() ?? 480) / 60).toStringAsFixed(1)} saat',
+                      amount(
+                        context,
+                        'hoursValue',
+                        ((profile?['sleepGoalMinutes'] as num?) ?? 480) / 60,
+                        1,
+                      ),
                     ),
                   ),
-                  const Divider(height: 1),
+                  Divider(height: 1),
                   ListTile(
-                    leading: const Icon(Icons.edit_outlined),
-                    title: const Text('Hədəfləri dəyiş'),
-                    trailing: const Icon(Icons.chevron_right),
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text(tr(context, "Hədəfləri dəyiş")),
+                    trailing: Icon(Icons.chevron_right),
                     onTap: () => _editGoals(context, profile),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            const _SettingsHeading('Tətbiq'),
+            SizedBox(height: 20),
+            _SettingsHeading(tr(context, "Tətbiq")),
             Card(
               child: Column(
-                children: const [
-                  ListTile(
-                    leading: Icon(Icons.language_outlined),
-                    title: Text('Dil'),
-                    trailing: Text('Azərbaycan dili'),
-                  ),
+                children: [
+                  LanguagePicker(),
                   Divider(height: 1),
                   ListTile(
                     leading: Icon(Icons.cloud_done_outlined),
-                    title: Text('Məlumatların saxlanması'),
+                    title: Text(tr(context, "Məlumatların saxlanması")),
                     subtitle: Text(
-                      'Qeydləriniz təhlükəsiz şəkildə hesabınıza bağlı saxlanır',
+                      tr(
+                        context,
+                        "Qeydləriniz təhlükəsiz şəkildə hesabınıza bağlı saxlanır",
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
             OutlinedButton.icon(
               onPressed: () => _signOut(context),
-              icon: const Icon(Icons.logout, color: Colors.red),
-              label: const Text(
-                'Hesabdan çıxış et',
+              icon: Icon(Icons.logout, color: Colors.red),
+              label: Text(
+                tr(context, "Hesabdan çıxış et"),
                 style: TextStyle(color: Colors.red),
               ),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.red),
+                side: BorderSide(color: Colors.red),
               ),
             ),
           ],
@@ -839,7 +804,7 @@ class _SettingsHeading extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 4, bottom: 8),
+    padding: EdgeInsets.only(left: 4, bottom: 8),
     child: Text(text, style: Theme.of(context).textTheme.titleMedium),
   );
 }
@@ -868,23 +833,36 @@ class _DashboardPageState extends State<DashboardPage> {
       DashboardRange.yearly => DateTime(today.year),
     };
     final end = switch (_range) {
-      DashboardRange.daily => start.add(const Duration(days: 1)),
-      DashboardRange.weekly => start.add(const Duration(days: 7)),
+      DashboardRange.daily => start.add(Duration(days: 1)),
+      DashboardRange.weekly => start.add(Duration(days: 7)),
       DashboardRange.monthly => DateTime(start.year, start.month + 1),
       DashboardRange.yearly => DateTime(start.year + 1),
     };
     final period = switch (_range) {
-      DashboardRange.daily => 'Bugünün xülasəsi',
-      DashboardRange.weekly => 'Bu həftənin xülasəsi',
-      DashboardRange.monthly => 'Bu ayın xülasəsi',
-      DashboardRange.yearly => 'Bu ilin xülasəsi',
+      DashboardRange.daily => tr(context, "Bugünün xülasəsi"),
+      DashboardRange.weekly => tr(context, "Bu həftənin xülasəsi"),
+      DashboardRange.monthly => tr(context, "Bu ayın xülasəsi"),
+      DashboardRange.yearly => tr(context, "Bu ilin xülasəsi"),
     };
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    return StreamBuilder<LocalSnapshot>(
       stream: _userCollection('meals')
           .where('loggedAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
           .where('loggedAt', isLessThan: Timestamp.fromDate(end))
           .snapshots(),
       builder: (context, mealsSnapshot) {
+        if (mealsSnapshot.hasError) {
+          return Center(
+            child: Text(
+              tr(
+                context,
+                "Yemək məlumatları yüklənmədi. Tətbiqi yenidən açın.",
+              ),
+            ),
+          );
+        }
+        if (!mealsSnapshot.hasData) {
+          return Center(child: CircularProgressIndicator());
+        }
         final meals =
             mealsSnapshot.data?.docs.map((doc) => doc.data()).toList() ?? [];
         num sum(String key) => meals.fold<num>(
@@ -895,7 +873,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final protein = sum('protein');
         final carbs = sum('carbs');
         final fat = sum('fat');
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        return StreamBuilder<LocalSnapshot>(
           stream: _userCollection('sleep')
               .where(
                 'wakeTime',
@@ -904,6 +882,19 @@ class _DashboardPageState extends State<DashboardPage> {
               .where('wakeTime', isLessThan: Timestamp.fromDate(end))
               .snapshots(),
           builder: (context, sleepSnapshot) {
+            if (sleepSnapshot.hasError) {
+              return Center(
+                child: Text(
+                  tr(
+                    context,
+                    "Yuxu məlumatları yüklənmədi. Tətbiqi yenidən açın.",
+                  ),
+                ),
+              );
+            }
+            if (!sleepSnapshot.hasData) {
+              return Center(child: CircularProgressIndicator());
+            }
             final sleep =
                 sleepSnapshot.data?.docs.map((doc) => doc.data()).toList() ??
                 [];
@@ -913,11 +904,8 @@ class _DashboardPageState extends State<DashboardPage> {
                   total + ((item['durationMinutes'] as num?)?.toInt() ?? 0),
             );
             final user = FirebaseAuth.instance.currentUser!;
-            return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid)
-                  .snapshots(),
+            return StreamBuilder<LocalProfileSnapshot>(
+              stream: LocalStore.instance.profile(user.uid),
               builder: (context, profileSnapshot) {
                 final profile = profileSnapshot.data?.data();
                 final calorieGoal =
@@ -927,94 +915,187 @@ class _DashboardPageState extends State<DashboardPage> {
                 final goalMultiplier = end.difference(start).inDays;
                 final calorieTarget = calorieGoal * goalMultiplier;
                 final sleepTarget = sleepGoalMinutes * goalMultiplier;
-                return ListView(
-                  padding: const EdgeInsets.all(20),
-                  children: [
-                    Text(
-                      period,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    const Text('Yemək və yuxu qeydlərin burada toplanır.'),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                return StreamBuilder<LocalSnapshot>(
+                  stream: _userCollection('water')
+                      .where(
+                        'loggedAt',
+                        isGreaterThanOrEqualTo: Timestamp.fromDate(start),
+                      )
+                      .where('loggedAt', isLessThan: Timestamp.fromDate(end))
+                      .snapshots(),
+                  builder: (context, waterSnapshot) {
+                    final water =
+                        waterSnapshot.data?.docs
+                            .map((doc) => doc.data())
+                            .toList() ??
+                        [];
+                    final waterMl = water.fold<num>(
+                      0,
+                      (total, item) =>
+                          total + ((item['milliliters'] as num?) ?? 0),
+                    );
+                    final waterTarget = 2500 * goalMultiplier;
+                    return ListView(
+                      padding: EdgeInsets.all(20),
                       children: [
-                        _rangeChip('Günlük', DashboardRange.daily),
-                        _rangeChip('Həftəlik', DashboardRange.weekly),
-                        _rangeChip('Aylıq', DashboardRange.monthly),
-                        _rangeChip('İllik', DashboardRange.yearly),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _GoalSummaryCard(
-                      icon: Icons.local_fire_department_outlined,
-                      title: 'Kalori',
-                      value: '${calories.toStringAsFixed(0)} kcal',
-                      target: '${calorieTarget.toStringAsFixed(0)} kcal hədəf',
-                      progress: calorieTarget == 0
-                          ? 0
-                          : calories / calorieTarget,
-                      subtitle: '${meals.length} yemək qeydi',
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(18),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        Text(
+                          period,
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          tr(
+                            context,
+                            "Yemək və yuxu qeydlərin burada toplanır.",
+                          ),
+                        ),
+                        SizedBox(height: 14),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
-                            const Text(
-                              'Makrolar',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 17,
-                              ),
+                            _rangeChip(
+                              tr(context, "Günlük"),
+                              DashboardRange.daily,
                             ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: _Macro(
-                                    label: 'Protein',
-                                    value: '${protein.toStringAsFixed(0)} g',
-                                    color: Colors.red,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _Macro(
-                                    label: 'Karbohidrat',
-                                    value: '${carbs.toStringAsFixed(0)} g',
-                                    color: Colors.orange,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _Macro(
-                                    label: 'Yağ',
-                                    value: '${fat.toStringAsFixed(0)} g',
-                                    color: Colors.blue,
-                                  ),
-                                ),
-                              ],
+                            _rangeChip(
+                              tr(context, "Həftəlik"),
+                              DashboardRange.weekly,
+                            ),
+                            _rangeChip(
+                              tr(context, "Aylıq"),
+                              DashboardRange.monthly,
+                            ),
+                            _rangeChip(
+                              tr(context, "İllik"),
+                              DashboardRange.yearly,
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _GoalSummaryCard(
-                      icon: Icons.bedtime_outlined,
-                      title: 'Yuxu',
-                      value: '${(sleepMinutes / 60).toStringAsFixed(1)} saat',
-                      target:
-                          '${(sleepTarget / 60).toStringAsFixed(1)} saat hədəf',
-                      progress: sleepTarget == 0
-                          ? 0
-                          : sleepMinutes / sleepTarget,
-                      subtitle: '${sleep.length} yuxu qeydi',
-                    ),
-                  ],
+                        SizedBox(height: 20),
+                        _GoalSummaryCard(
+                          icon: Icons.local_fire_department_outlined,
+                          title: tr(context, "Kalori"),
+                          value: amount(context, 'kcalValue', calories),
+                          target: amount(
+                            context,
+                            'calorieTarget',
+                            calorieTarget,
+                          ),
+                          progress: calorieTarget == 0
+                              ? 0
+                              : calories / calorieTarget,
+                          subtitle: amount(context, 'mealCount', meals.length),
+                          onTap: () => showDialog<void>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                              title: Text(tr(context, 'Kalori məlumatı')),
+                              content: Text(
+                                tr(
+                                  context,
+                                  'Kalori yediyiniz bütün yeməklərin cəmidir. Bu kart gün və ya seçdiyiniz dövr üçün ümumi kalorini, hədəfi və irəliləyişi göstərir.',
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: Text(tr(context, 'Ləğv et')),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Card(
+                          child: Padding(
+                            padding: EdgeInsets.all(18),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tr(context, "Makrolar"),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 17,
+                                  ),
+                                ),
+                                SizedBox(height: 14),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _Macro(
+                                        label: tr(context, "Protein"),
+                                        value: amount(
+                                          context,
+                                          'gramValue',
+                                          protein,
+                                        ),
+                                        color: Colors.red,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _Macro(
+                                        label: tr(context, "Karbohidrat"),
+                                        value: amount(
+                                          context,
+                                          'gramValue',
+                                          carbs,
+                                        ),
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _Macro(
+                                        label: tr(context, "Yağ"),
+                                        value: amount(
+                                          context,
+                                          'gramValue',
+                                          fat,
+                                        ),
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        _GoalSummaryCard(
+                          icon: Icons.bedtime_outlined,
+                          title: tr(context, "Yuxu"),
+                          value: amount(
+                            context,
+                            'hoursValue',
+                            sleepMinutes / 60,
+                            1,
+                          ),
+                          target: amount(
+                            context,
+                            'sleepTarget',
+                            sleepTarget / 60,
+                            1,
+                          ),
+                          progress: sleepTarget == 0
+                              ? 0
+                              : sleepMinutes / sleepTarget,
+                          subtitle: amount(context, 'sleepCount', sleep.length),
+                        ),
+                        SizedBox(height: 12),
+                        _GoalSummaryCard(
+                          icon: Icons.water_drop_outlined,
+                          title: tr(context, 'Gündəlik su'),
+                          value: amount(context, 'mlValue', waterMl),
+                          target: amount(context, 'waterTarget', waterTarget),
+                          progress: waterTarget == 0
+                              ? 0
+                              : waterMl / waterTarget,
+                          subtitle: amount(context, 'suCount', water.length),
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             );
@@ -1039,6 +1120,7 @@ class _GoalSummaryCard extends StatelessWidget {
     required this.target,
     required this.progress,
     required this.subtitle,
+    this.onTap,
   });
   final IconData icon;
   final String title;
@@ -1046,56 +1128,58 @@ class _GoalSummaryCard extends StatelessWidget {
   final String target;
   final num progress;
   final String subtitle;
+  final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                size: 30,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 17,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(
+                  icon,
+                  size: 30,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 17,
+                        ),
                       ),
-                    ),
-                    Text(subtitle),
-                  ],
+                      Text(subtitle),
+                    ],
+                  ),
                 ),
-              ),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 17,
+                Text(
+                  value,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: progress.clamp(0, 1).toDouble(),
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          const SizedBox(height: 7),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(target, style: const TextStyle(color: Colors.grey)),
-          ),
-        ],
+              ],
+            ),
+            SizedBox(height: 12),
+            LinearProgressIndicator(
+              value: progress.clamp(0, 1).toDouble(),
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            SizedBox(height: 7),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(target, style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -1117,127 +1201,290 @@ class _Macro extends StatelessWidget {
           fontSize: 17,
         ),
       ),
-      const SizedBox(height: 4),
-      Text(
-        label,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 12),
-      ),
+      SizedBox(height: 4),
+      Text(label, textAlign: TextAlign.center, style: TextStyle(fontSize: 12)),
     ],
   );
 }
 
-class MealsPage extends StatelessWidget {
-  const MealsPage({super.key});
+class AddPage extends StatefulWidget {
+  const AddPage({super.key});
+
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _userCollection('meals')
-            .orderBy('loggedAt', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(child: Text('Yemək qeydləri yüklənmədi.'));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final meals = snapshot.data!.docs;
-          if (meals.isEmpty) {
-            return const _EmptyState(
-              icon: Icons.restaurant_outlined,
-              title: 'Hələ yemək qeydi yoxdur',
-              message: 'İlk yeməyini əlavə et.',
-            );
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: meals.length,
-            itemBuilder: (context, index) {
-              final data = meals[index].data();
-              final time = (data['loggedAt'] as Timestamp?)?.toDate();
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.restaurant),
-                  title: Text(data['name'] as String? ?? 'Yemək'),
-                  subtitle: Text(
-                    '${data['mealType'] ?? 'Yemək'}${time == null ? '' : ' • ${_timeText(time)}'}\nP: ${data['protein'] ?? 0}g  K: ${data['carbs'] ?? 0}g  Y: ${data['fat'] ?? 0}g',
-                  ),
-                  isThreeLine: true,
-                  trailing: Text(
-                    '${data['calories'] ?? 0}\nkcal',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showMealDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Yemək əlavə et'),
-      ),
-    );
-  }
+  State<AddPage> createState() => _AddPageState();
 }
 
-class SleepPage extends StatelessWidget {
-  const SleepPage({super.key});
+class _AddPageState extends State<AddPage> {
+  EntryKind _selected = EntryKind.meal;
+  bool _addingGlass = false;
+
+  String get _collection => switch (_selected) {
+    EntryKind.meal => 'meals',
+    EntryKind.sleep => 'sleep',
+    EntryKind.water => 'water',
+    EntryKind.goals => 'profile',
+  };
+
+  Future<bool> _confirmDelete() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(tr(context, 'Qeydi sil')),
+          content: Text(tr(context, 'Bu qeydi silmək istəyirsiniz?')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(tr(context, 'Ləğv et')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(tr(context, 'Sil')),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _addGlass() async {
+    if (_addingGlass) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    setState(() => _addingGlass = true);
+    try {
+      await LocalStore.instance.saveEntry(
+        user.uid,
+        'water',
+        LocalStore.instance.newId(),
+        {
+          'milliliters': 250,
+          'loggedAt': DateTime.now(),
+          'createdAt': DateTime.now(),
+        },
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${tr(context, 'Uğurla əlavə edildi! 🎉')} 250 ml'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _addingGlass = false);
+    }
+  }
+
+  Widget _typeButton(EntryKind kind, IconData icon, String label) => Expanded(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: FilledButton.tonalIcon(
+        onPressed: () {
+          setState(() => _selected = kind);
+          if (kind != EntryKind.water) _showEntryPage(context, kind);
+        },
+        icon: Icon(icon),
+        label: Text(label, overflow: TextOverflow.ellipsis),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _userCollection('sleep')
-            .orderBy('wakeTime', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(child: Text('Yuxu qeydləri yüklənmədi.'));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final entries = snapshot.data!.docs;
-          if (entries.isEmpty) {
-            return const _EmptyState(
-              icon: Icons.bedtime_outlined,
-              title: 'Hələ yuxu qeydi yoxdur',
-              message: 'Yuxu saatlarını əlavə et.',
-            );
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: entries.length,
-            itemBuilder: (context, index) {
-              final data = entries[index].data();
-              final bed = (data['bedtime'] as Timestamp).toDate();
-              final wake = (data['wakeTime'] as Timestamp).toDate();
-              final minutes = (data['durationMinutes'] as num).toInt();
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.bedtime),
-                  title: Text('${_timeText(bed)} – ${_timeText(wake)}'),
-                  subtitle: Text('Keyfiyyət: ${data['quality']}/5'),
-                  trailing: Text(
-                    '${(minutes / 60).toStringAsFixed(1)}\nsaat',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+    final labels = <EntryKind, String>{
+      EntryKind.meal: tr(context, 'Yeməklər'),
+      EntryKind.sleep: tr(context, 'Yuxu'),
+      EntryKind.water: tr(context, 'Su'),
+    };
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+          child: Row(
+            children: [
+              _typeButton(
+                EntryKind.meal,
+                Icons.restaurant,
+                labels[EntryKind.meal]!,
+              ),
+              _typeButton(
+                EntryKind.sleep,
+                Icons.bedtime,
+                labels[EntryKind.sleep]!,
+              ),
+              _typeButton(
+                EntryKind.water,
+                Icons.water_drop,
+                labels[EntryKind.water]!,
+              ),
+            ],
+          ),
+        ),
+        if (_selected == EntryKind.water)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _addingGlass ? null : _addGlass,
+                    icon: const Icon(Icons.local_drink),
+                    label: Text('${tr(context, 'Bir stəkan')} (250 ml)'),
                   ),
                 ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => _showEntryPage(context, EntryKind.water),
+                  child: Text(tr(context, 'Fərqli miqdar')),
+                ),
+              ],
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: SegmentedButton<EntryKind>(
+            showSelectedIcon: false,
+            segments: [
+              for (final entry in labels.entries)
+                ButtonSegment(value: entry.key, label: Text(entry.value)),
+            ],
+            selected: {_selected},
+            onSelectionChanged: (value) =>
+                setState(() => _selected = value.single),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: StreamBuilder<LocalSnapshot>(
+            stream: _userCollection(_collection)
+                .orderBy(
+                  _selected == EntryKind.sleep ? 'wakeTime' : 'loggedAt',
+                  descending: true,
+                )
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final entries = snapshot.data!.docs;
+              if (entries.isEmpty) {
+                return _EmptyState(
+                  icon: _selected == EntryKind.meal
+                      ? Icons.restaurant_outlined
+                      : _selected == EntryKind.sleep
+                      ? Icons.bedtime_outlined
+                      : Icons.water_drop_outlined,
+                  title: _selected == EntryKind.meal
+                      ? tr(context, 'Hələ yemək qeydi yoxdur')
+                      : _selected == EntryKind.sleep
+                      ? tr(context, 'Hələ yuxu qeydi yoxdur')
+                      : tr(context, 'Su qeydləri'),
+                  message: _selected == EntryKind.meal
+                      ? tr(context, 'İlk yeməyini əlavə et.')
+                      : _selected == EntryKind.sleep
+                      ? tr(context, 'Yuxu saatlarını əlavə et.')
+                      : tr(context, 'Gündə içdiyiniz su miqdarını yazın.'),
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  final data = entry.data();
+                  return Dismissible(
+                    key: ValueKey('$_collection-${entry.id}'),
+                    direction: DismissDirection.horizontal,
+                    background: Container(
+                      color: Colors.blue,
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.only(left: 24),
+                      child: const Icon(Icons.edit, color: Colors.white),
+                    ),
+                    secondaryBackground: Container(
+                      color: Colors.red,
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 24),
+                      child: const Icon(Icons.delete, color: Colors.white),
+                    ),
+                    confirmDismiss: (direction) async {
+                      final collection = _collection;
+                      final uid = FirebaseAuth.instance.currentUser!.uid;
+                      final messenger = ScaffoldMessenger.of(context);
+                      final deletedMessage = tr(context, 'Qeyd silindi.');
+                      if (direction == DismissDirection.startToEnd) {
+                        await _showEntryPage(
+                          context,
+                          _selected,
+                          initialData: data,
+                          entryId: entry.id,
+                        );
+                        return false;
+                      }
+                      if (!await _confirmDelete()) {
+                        return false;
+                      }
+                      await LocalStore.instance.deleteEntry(
+                        uid,
+                        collection,
+                        entry.id,
+                      );
+                      if (!mounted) return false;
+                      messenger.showSnackBar(
+                        SnackBar(content: Text(deletedMessage)),
+                      );
+                      return true;
+                    },
+                    child: Card(child: _entryTile(context, data)),
+                  );
+                },
               );
             },
-          );
-        },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _entryTile(BuildContext context, Map<String, dynamic> data) {
+    if (_selected == EntryKind.meal) {
+      final time = (data['loggedAt'] as Timestamp?)?.toDate();
+      return ListTile(
+        leading: const Icon(Icons.restaurant),
+        title: Text(data['name'] as String? ?? tr(context, 'Yemək')),
+        subtitle: Text(
+          '${mealTypeText(context, data['mealType'] as String?)}${time == null ? '' : ' • ${_timeText(context, time)}'}\n${tr(context, 'macroValues', {
+            for (final key in ['protein', 'carbs', 'fat']) key: formatNumber(context, (data[key] as num?) ?? 0, 1),
+          })}',
+        ),
+        isThreeLine: true,
+        trailing: Text(
+          amount(context, 'kcalValue', (data['calories'] as num?) ?? 0),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      );
+    }
+    if (_selected == EntryKind.sleep) {
+      final bed = (data['bedtime'] as Timestamp).toDate();
+      final wake = (data['wakeTime'] as Timestamp).toDate();
+      final minutes = (data['durationMinutes'] as num).toInt();
+      return ListTile(
+        leading: const Icon(Icons.bedtime),
+        title: Text('${_timeText(context, bed)} – ${_timeText(context, wake)}'),
+        subtitle: Text(
+          amount(context, 'qualityValue', (data['quality'] as num?) ?? 3),
+        ),
+        trailing: Text(
+          amount(context, 'hoursValue', minutes / 60, 1),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      );
+    }
+    return ListTile(
+      leading: const Icon(Icons.water_drop),
+      title: Text(
+        amount(context, 'mlValue', (data['milliliters'] as num?) ?? 0),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showSleepDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Yuxu əlavə et'),
-      ),
+      subtitle: Text(tr(context, 'Gündəlik su')),
     );
   }
 }
@@ -1254,14 +1501,14 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
     child: Padding(
-      padding: const EdgeInsets.all(32),
+      padding: EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           Text(title, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(message, textAlign: TextAlign.center),
         ],
       ),
@@ -1269,190 +1516,75 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
-Future<void> _showMealDialog(BuildContext context) async {
-  final name = TextEditingController();
-  final calories = TextEditingController();
-  final protein = TextEditingController(text: '0');
-  final carbs = TextEditingController(text: '0');
-  final fat = TextEditingController(text: '0');
-  String mealType = 'Səhər yeməyi';
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: const Text('Yemək əlavə et'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: name,
-                autofocus: true,
-                decoration: const InputDecoration(labelText: 'Yeməyin adı'),
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: mealType,
-                decoration: const InputDecoration(labelText: 'Növ'),
-                items:
-                    const ['Səhər yeməyi', 'Nahar', 'Şam yeməyi', 'Ara yemək']
-                        .map(
-                          (value) => DropdownMenuItem(
-                            value: value,
-                            child: Text(value),
-                          ),
-                        )
-                        .toList(),
-                onChanged: (value) => setDialogState(() => mealType = value!),
-              ),
-              TextField(
-                controller: calories,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Kalori (kcal)'),
-              ),
-              TextField(
-                controller: protein,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Protein (g)'),
-              ),
-              TextField(
-                controller: carbs,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Karbohidrat (g)'),
-              ),
-              TextField(
-                controller: fat,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Yağ (g)'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Ləğv et'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final calorieValue = double.tryParse(
-                calories.text.replaceAll(',', '.'),
-              );
-              if (name.text.trim().isEmpty || calorieValue == null) return;
-              await _userCollection('meals').add({
-                'name': name.text.trim(),
-                'mealType': mealType,
-                'calories': calorieValue,
-                'protein':
-                    double.tryParse(protein.text.replaceAll(',', '.')) ?? 0,
-                'carbs': double.tryParse(carbs.text.replaceAll(',', '.')) ?? 0,
-                'fat': double.tryParse(fat.text.replaceAll(',', '.')) ?? 0,
-                'loggedAt': Timestamp.now(),
-                'createdAt': FieldValue.serverTimestamp(),
-              });
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
-            },
-            child: const Text('Yadda saxla'),
-          ),
-        ],
+Future<void> _showEntryPage(
+  BuildContext context,
+  EntryKind kind, {
+  Map<String, dynamic>? profile,
+  Map<String, dynamic>? initialData,
+  String? entryId,
+}) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+  final store = LocalStore.instance;
+  final id = entryId ?? store.newId();
+  final saved = await Navigator.of(context).push<bool>(
+    MaterialPageRoute(
+      builder: (_) => EntryPage(
+        kind: kind,
+        profile: profile,
+        initialData: initialData,
+        onSave: (data) async {
+          if (FirebaseAuth.instance.currentUser?.uid != user.uid) {
+            throw StateError(tr(context, "Hesab sessiyası dəyişib."));
+          }
+          if (kind == EntryKind.goals) {
+            await store.saveProfile(user.uid, data);
+          } else {
+            await store.saveEntry(
+              user.uid,
+              switch (kind) {
+                EntryKind.meal => 'meals',
+                EntryKind.sleep => 'sleep',
+                EntryKind.water => 'water',
+                EntryKind.goals => 'profile',
+              },
+              id,
+              {
+                ...initialData ?? <String, dynamic>{},
+                ...data,
+                'createdAt': initialData?['createdAt'] ?? DateTime.now(),
+              },
+            );
+          }
+        },
       ),
     ),
   );
-  name.dispose();
-  calories.dispose();
-  protein.dispose();
-  carbs.dispose();
-  fat.dispose();
-}
-
-Future<void> _showSleepDialog(BuildContext context) async {
-  DateTime bedtime = DateTime.now().subtract(const Duration(hours: 8));
-  DateTime wakeTime = DateTime.now();
-  int quality = 3;
-  Future<DateTime?> pick(DateTime current) async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: current,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (date == null || !context.mounted) return null;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(current),
-    );
-    return time == null
-        ? null
-        : DateTime(date.year, date.month, date.day, time.hour, time.minute);
-  }
-
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        title: const Text('Yuxu əlavə et'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+  if (saved == true && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Color(0xFF237A45),
+        duration: Duration(seconds: 4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Row(
           children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Yatış saatı'),
-              subtitle: Text(
-                '${bedtime.day}.${bedtime.month}.${bedtime.year} • ${_timeText(bedtime)}',
-              ),
-              trailing: const Icon(Icons.edit),
-              onTap: () async {
-                final value = await pick(bedtime);
-                if (value != null) setDialogState(() => bedtime = value);
-              },
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Oyanış saatı'),
-              subtitle: Text(
-                '${wakeTime.day}.${wakeTime.month}.${wakeTime.year} • ${_timeText(wakeTime)}',
-              ),
-              trailing: const Icon(Icons.edit),
-              onTap: () async {
-                final value = await pick(wakeTime);
-                if (value != null) setDialogState(() => wakeTime = value);
-              },
-            ),
-            DropdownButtonFormField<int>(
-              initialValue: quality,
-              decoration: const InputDecoration(labelText: 'Yuxu keyfiyyəti'),
-              items: List.generate(
-                5,
-                (index) => DropdownMenuItem(
-                  value: index + 1,
-                  child: Text('${index + 1} / 5'),
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                kind == EntryKind.goals
+                    ? tr(context, "Hədəflər uğurla saxlanıldı! 🎉")
+                    : tr(context, "Uğurla əlavə edildi! 🎉"),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              onChanged: (value) => setDialogState(() => quality = value!),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Ləğv et'),
-          ),
-          FilledButton(
-            onPressed: wakeTime.isAfter(bedtime)
-                ? () async {
-                    await _userCollection('sleep').add({
-                      'bedtime': Timestamp.fromDate(bedtime),
-                      'wakeTime': Timestamp.fromDate(wakeTime),
-                      'durationMinutes': wakeTime.difference(bedtime).inMinutes,
-                      'quality': quality,
-                      'createdAt': FieldValue.serverTimestamp(),
-                    });
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  }
-                : null,
-            child: const Text('Yadda saxla'),
-          ),
-        ],
       ),
-    ),
-  );
+    );
+  }
 }

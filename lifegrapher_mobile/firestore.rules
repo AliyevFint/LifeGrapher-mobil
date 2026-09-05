@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    match /users/{uid} {
+      allow read, write: if owner(uid);
+      match /meals/{entry} {
+        allow read, write: if owner(uid);
+      }
+      match /sleep/{entry} {
+        allow read, write: if owner(uid);
+      }
+    }
+    // ID reservations never grant access to another user's private profile.
+    match /userIds/{loginId} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null
+        && loginId != '34555'
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt']);
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+  }
+}
