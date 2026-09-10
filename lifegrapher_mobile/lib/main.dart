@@ -14,6 +14,7 @@ import 'app_language.dart';
 import 'firebase_options.dart';
 import 'entry_page.dart';
 import 'local_store.dart';
+import 'body_profile.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -121,7 +122,11 @@ class _AuthGateState extends State<AuthGate> {
       return Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_user != null) {
-      return HomeScreen();
+      return BodyProfileGate(
+        key: ValueKey(_user!.uid),
+        uid: _user!.uid,
+        child: const HomeScreen(),
+      );
     }
     return LoginScreen();
   }
@@ -604,6 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           const DashboardPage(),
           const AddPage(),
+          BodyProgressPage(uid: FirebaseAuth.instance.currentUser!.uid),
           const SettingsPage(),
         ],
       ),
@@ -621,6 +627,10 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.add_circle_outline),
             selectedIcon: Icon(Icons.add_circle),
             label: tr(context, "Əlavə et"),
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.accessibility_new),
+            label: 'Bədənim',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
